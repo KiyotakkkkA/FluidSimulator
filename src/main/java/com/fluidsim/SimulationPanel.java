@@ -14,15 +14,26 @@ import java.awt.event.MouseEvent;
 import java.awt.geom.AffineTransform;
 import java.awt.image.BufferedImage;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 
 import javax.swing.JPanel;
 
-public class SimulationPanel extends JPanel {
+import com.fluidsim.materials.Gasoline;
+import com.fluidsim.materials.Glycerin;
+import com.fluidsim.materials.Material;
+import com.fluidsim.materials.Mercury;
+import com.fluidsim.materials.Oil;
+import com.fluidsim.materials.Water;
+import com.fluidsim.physics.FluidSimulator;
+import com.fluidsim.physics.SimulationListener;
+import com.fluidsim.physics.SimulationState;
+
+public class SimulationPanel extends JPanel implements SimulationListener {
     private final GPUCalculator gpuCalculator;
     private int particleSize = SimulationConstants.INITIAL_PARTICLE_SIZE;
     private float[] particles;
-    private final BufferedImage particleImage;
+    private BufferedImage particleImage;
     private final int imageSize = 20;
     private Point mousePosition = new Point(0, 0);
     private float mouseForce = 0;
@@ -43,6 +54,10 @@ public class SimulationPanel extends JPanel {
     private boolean temperatureColoring = false;
     private float currentTemperature = SimulationConstants.INITIAL_TEMPERATURE;
     private float[] particleTemperatures;
+    private Material currentMaterial;
+    private int[] particleColors;
+    private int[] particleMaterials;
+    private int currentMaterialIndex;
 
     public enum MouseMode {
         DRAWING,
@@ -54,8 +69,12 @@ public class SimulationPanel extends JPanel {
     private boolean fixedTemperature = false;
     private float temperatureChangeRate = 50.0f;
 
+    private final FluidSimulator simulator;
+
     public SimulationPanel(GPUCalculator gpuCalculator) {
         this.gpuCalculator = gpuCalculator;
+        this.simulator = new FluidSimulator(gpuCalculator);
+        simulator.addListener(this);
         setBackground(SimulationConstants.BACKGROUND_COLOR);
         initializeParticles();
         particleImage = createParticleImage();
@@ -141,14 +160,20 @@ public class SimulationPanel extends JPanel {
         int rows = usableHeight / SimulationConstants.PARTICLE_SPACING;
         
         particles = new float[cols * rows * 4];
+        particleColors = new int[cols * rows];
+        particleMaterials = new int[cols * rows];
         
         for (int i = 0; i < rows; i++) {
             for (int j = 0; j < cols; j++) {
-                int idx = (i * cols + j) * 4;
-                particles[idx] = margin + j * SimulationConstants.PARTICLE_SPACING;
-                particles[idx + 1] = margin + i * SimulationConstants.PARTICLE_SPACING;
-                particles[idx + 2] = 0;
-                particles[idx + 3] = 0;
+                int idx = (i * cols + j);
+                int pidx = idx * 4;
+                particles[pidx] = margin + j * SimulationConstants.PARTICLE_SPACING;
+                particles[pidx + 1] = margin + i * SimulationConstants.PARTICLE_SPACING;
+                particles[pidx + 2] = 0;
+                particles[pidx + 3] = 0;
+                particleColors[idx] = currentMaterial != null ? 
+                    currentMaterial.getColor() : SimulationConstants.PARTICLE_COLOR.getRGB();
+                particleMaterials[idx] = 0;
             }
         }
     }
@@ -157,7 +182,10 @@ public class SimulationPanel extends JPanel {
         BufferedImage img = new BufferedImage(imageSize, imageSize, BufferedImage.TYPE_INT_ARGB);
         Graphics2D g2 = img.createGraphics();
         g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
-        g2.setColor(SimulationConstants.PARTICLE_COLOR);
+        
+        Color color = currentMaterial != null ? new Color(currentMaterial.getColor()) : SimulationConstants.PARTICLE_COLOR;
+        g2.setColor(color);
+        
         g2.fillOval(0, 0, imageSize-1, imageSize-1);
         g2.dispose();
         return img;
@@ -196,30 +224,52 @@ public class SimulationPanel extends JPanel {
                 }
             }
 
-            if (particles.length > 0) {
-                particles = gpuCalculator.updateParticles(
-                    particles,
-                    particleTemperatures,
-                    getWidth(),
-                    getHeight(),
-                    mousePosition.x,
-                    mousePosition.y,
-                    mouseForce,
-                    deltaTime,
-                    currentViscosity,
-                    currentRepulsion,
-                    currentSurfaceTension,
-                    currentGravity,
-                    currentMouseForce
-                );
-                
-                float[] historyCopy = new float[particles.length];
-                System.arraycopy(particles, 0, historyCopy, 0, particles.length);
-                particleHistory.add(historyCopy);
-                while (particleHistory.size() > maxHistorySize) {
-                    particleHistory.remove(0);
-                }
+            // Создаем текущее состояние и обновляем симуляцию
+            List<Material> materials = Arrays.asList(
+                new Water(), new Oil(), new Mercury(),
+                new Gasoline(), new Glycerin()
+            );
+            
+            float[] materialProps = new float[materials.size() * 4];
+            for (int i = 0; i < materials.size(); i++) {
+                Material m = materials.get(i);
+                int offset = i * 4;
+                materialProps[offset] = (float)m.getDensity();
+                materialProps[offset + 1] = (float)m.getViscosity();
+                materialProps[offset + 2] = (float)m.getSurfaceTension();
+                materialProps[offset + 3] = (float)m.getElasticity();
             }
+
+            SimulationState state = new SimulationState(
+                particles,
+                particleTemperatures,
+                particleMaterials,
+                materialProps,
+                getWidth(),
+                getHeight(),
+                mouseForce,
+                currentViscosity,
+                currentRepulsion,
+                currentSurfaceTension,
+                currentGravity,
+                mousePosition.x,
+                mousePosition.y,
+                currentMouseForce
+            );
+
+            simulator.setState(state);
+            simulator.update(deltaTime);
+            
+            // Сохраняем состояние для перемотки
+            float[] historyCopy = new float[particles.length];
+            System.arraycopy(particles, 0, historyCopy, 0, particles.length);
+            particleHistory.add(historyCopy);
+            while (particleHistory.size() > maxHistorySize) {
+                particleHistory.remove(0);
+            }
+            
+            // Обновляем частицы из состояния симуляции
+            particles = simulator.getCurrentState().getParticles();
         } else if (!particleHistory.isEmpty()) {
             particles = particleHistory.remove(particleHistory.size() - 1);
             if (particles.length > 0) {
@@ -271,9 +321,8 @@ public class SimulationPanel extends JPanel {
                     transform.scale(scale, scale);
                     g2d.fillOval((int)x, (int)y, particleSize, particleSize);
                 } else {
-                    transform.setToTranslation(x, y);
-                    transform.scale(scale, scale);
-                    g2d.drawImage(particleImage, transform, null);
+                    g2d.setColor(new Color(particleColors[i/4]));
+                    g2d.fillOval((int)x, (int)y, particleSize, particleSize);
                 }
             }
         }
@@ -324,31 +373,46 @@ public class SimulationPanel extends JPanel {
         int newParticles = (int)spawnRate;
         float[] newArray = new float[(particles.length + newParticles * 4)];
         float[] newTemperatures = new float[particleTemperatures.length + newParticles];
+        int[] newColors = new int[particleColors.length + newParticles];
+        int[] newMaterials = new int[particleMaterials.length + newParticles];
         
         System.arraycopy(particles, 0, newArray, 0, particles.length);
         System.arraycopy(particleTemperatures, 0, newTemperatures, 0, particleTemperatures.length);
+        System.arraycopy(particleColors, 0, newColors, 0, particleColors.length);
+        System.arraycopy(particleMaterials, 0, newMaterials, 0, particleMaterials.length);
         
+        int currentColor = currentMaterial != null ? 
+            currentMaterial.getColor() : SimulationConstants.PARTICLE_COLOR.getRGB();
+            
         for(int i = 0; i < newParticles; i++) {
-            int idx = particles.length + i * 4;
+            int idx = particles.length / 4 + i;
+            int pidx = particles.length + i * 4;
+            
             double angle = Math.random() * 2 * Math.PI;
             double radius = Math.random() * spawnRadius;
             
-            newArray[idx] = position.x + (float)(Math.cos(angle) * radius);
-            newArray[idx + 1] = position.y + (float)(Math.sin(angle) * radius);
-            newArray[idx + 2] = 0;
-            newArray[idx + 3] = 0;
+            newArray[pidx] = position.x + (float)(Math.cos(angle) * radius);
+            newArray[pidx + 1] = position.y + (float)(Math.sin(angle) * radius);
+            newArray[pidx + 2] = 0;
+            newArray[pidx + 3] = 0;
             
             newTemperatures[particleTemperatures.length + i] = SimulationConstants.INITIAL_TEMPERATURE;
+            newColors[idx] = currentColor;
+            newMaterials[idx] = currentMaterialIndex;
         }
         
         particles = newArray;
         particleTemperatures = newTemperatures;
+        particleColors = newColors;
+        particleMaterials = newMaterials;
         gpuCalculator.updateWorkSize(particles.length / 4);
     }
 
     public void clearParticles() {
         particles = new float[0];
         particleTemperatures = new float[0];
+        particleColors = new int[0];
+        particleMaterials = new int[0];
         particleHistory.clear();
         gpuCalculator.updateWorkSize(0);
     }
@@ -382,5 +446,27 @@ public class SimulationPanel extends JPanel {
         int g = (int)(c1.getGreen() + (c2.getGreen() - c1.getGreen()) * ratio);
         int b = (int)(c1.getBlue() + (c2.getBlue() - c1.getBlue()) * ratio);
         return new Color(r, g, b);
+    }
+
+    public void setMaterial(Material material) {
+        this.currentMaterial = material;
+        this.currentMaterialIndex = getMaterialIndex(material);
+        gpuCalculator.setDensity(material.getDensity());
+        this.particleImage = createParticleImage();
+        repaint();
+    }
+
+    private int getMaterialIndex(Material material) {
+        if (material instanceof Water) return 0;
+        if (material instanceof Oil) return 1;
+        if (material instanceof Mercury) return 2;
+        if (material instanceof Gasoline) return 3;
+        if (material instanceof Glycerin) return 4;
+        return 0;
+    }
+
+    @Override
+    public void onSimulationUpdated(SimulationState state) {
+        repaint();  // Перерисовываем панель при обновлении физики
     }
 } 

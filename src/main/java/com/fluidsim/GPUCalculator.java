@@ -43,8 +43,17 @@ public class GPUCalculator implements AutoCloseable {
     private cl_mem neighborIndicesBuffer;
     private cl_mem neighborCountsBuffer;
     private cl_mem temperaturesBuffer;
+    private cl_mem materialIndicesBuffer;
+    private cl_mem materialPropertiesBuffer;
     private final int[] workDimensions;
     private final int MAX_NEIGHBORS = 64;
+    private cl_kernel densityKernel;
+    private cl_kernel forcesKernel;
+    private cl_kernel integrationKernel;
+    private cl_mem forcesBuffer;
+    private cl_mem localDensitiesBuffer;
+    
+    private static final int WORKGROUP_SIZE = 256; // Оптимальный размер для большинства GPU
 
     public GPUCalculator() {
         initializeCL();
@@ -100,12 +109,14 @@ public class GPUCalculator implements AutoCloseable {
     }
 
     public float[] updateParticles(float[] particles, float[] temperatures,
+                                 int[] materialIndices, float[] materialProperties,
                                  int width, int height,
                                  int mouseX, int mouseY, float mouseForce,
                                  float deltaTime, float viscosity,
                                  float repulsion, float surfaceTension,
                                  float gravity, float currentMouseForce) {
         int numParticles = particles.length / 4;
+        int numWorkGroups = (numParticles + WORKGROUP_SIZE - 1) / WORKGROUP_SIZE;
         
         if (neighborIndicesBuffer == null) {
             neighborIndicesBuffer = clCreateBuffer(context,
@@ -122,7 +133,7 @@ public class GPUCalculator implements AutoCloseable {
         if (persistentParticlesBuffer == null) {
             persistentParticlesBuffer = clCreateBuffer(context, 
                 CL_MEM_READ_WRITE | CL_MEM_COPY_HOST_PTR,
-                Sizeof.cl_float * particles.length * 2,
+                Sizeof.cl_float * particles.length,
                 Pointer.to(particles), null);
                 
             workDimensions[0] = particles.length / 4;
@@ -137,6 +148,13 @@ public class GPUCalculator implements AutoCloseable {
         } else {
             clEnqueueWriteBuffer(commandQueue, temperaturesBuffer, CL_TRUE, 0,
                 temperatures.length * Sizeof.cl_float, Pointer.to(temperatures), 0, null, null);
+        }
+
+        if (materialIndicesBuffer == null) {
+            materialIndicesBuffer = clCreateBuffer(context, CL_MEM_READ_WRITE | CL_MEM_COPY_HOST_PTR,
+                Sizeof.cl_int * materialIndices.length, Pointer.to(materialIndices), null);
+            materialPropertiesBuffer = clCreateBuffer(context, CL_MEM_READ_WRITE | CL_MEM_COPY_HOST_PTR,
+                Sizeof.cl_float * materialProperties.length, Pointer.to(materialProperties), null);
         }
 
         clSetKernelArg(spatialHashKernel, 0, Sizeof.cl_mem, Pointer.to(persistentParticlesBuffer));
@@ -162,6 +180,9 @@ public class GPUCalculator implements AutoCloseable {
         clSetKernelArg(updateKernel, 11, Sizeof.cl_float, Pointer.to(new float[]{surfaceTension}));
         clSetKernelArg(updateKernel, 12, Sizeof.cl_float, Pointer.to(new float[]{gravity}));
         clSetKernelArg(updateKernel, 13, Sizeof.cl_float, Pointer.to(new float[]{currentMouseForce}));
+        clSetKernelArg(updateKernel, 14, Sizeof.cl_float, Pointer.to(new float[]{1.0f}));
+        clSetKernelArg(updateKernel, 15, Sizeof.cl_mem, Pointer.to(materialIndicesBuffer));
+        clSetKernelArg(updateKernel, 16, Sizeof.cl_mem, Pointer.to(materialPropertiesBuffer));
         
         clEnqueueNDRangeKernel(commandQueue, updateKernel, 1, null,
                 new long[]{workDimensions[0]}, null, 0, null, null);
@@ -183,16 +204,36 @@ public class GPUCalculator implements AutoCloseable {
             clReleaseMemObject(neighborIndicesBuffer);
             clReleaseMemObject(neighborCountsBuffer);
             clReleaseMemObject(temperaturesBuffer);
+            clReleaseMemObject(materialIndicesBuffer);
+            clReleaseMemObject(materialPropertiesBuffer);
         }
         persistentParticlesBuffer = null;
         neighborIndicesBuffer = null;
         neighborCountsBuffer = null;
         temperaturesBuffer = null;
+        materialIndicesBuffer = null;
+        materialPropertiesBuffer = null;
+    }
+
+    public void setDensity(double density) {
+        float densityValue = (float) density;
+        clSetKernelArg(updateKernel, 14, Sizeof.cl_float, Pointer.to(new float[]{densityValue}));
     }
 
     @Override
     public void close() {
+        if (persistentParticlesBuffer != null) clReleaseMemObject(persistentParticlesBuffer);
+        if (neighborIndicesBuffer != null) clReleaseMemObject(neighborIndicesBuffer);
+        if (neighborCountsBuffer != null) clReleaseMemObject(neighborCountsBuffer);
         if (temperaturesBuffer != null) clReleaseMemObject(temperaturesBuffer);
+        if (materialIndicesBuffer != null) clReleaseMemObject(materialIndicesBuffer);
+        if (materialPropertiesBuffer != null) clReleaseMemObject(materialPropertiesBuffer);
+        
+        persistentParticlesBuffer = null;
+        neighborIndicesBuffer = null;
+        neighborCountsBuffer = null;
         temperaturesBuffer = null;
+        materialIndicesBuffer = null;
+        materialPropertiesBuffer = null;
     }
 } 

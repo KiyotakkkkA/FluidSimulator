@@ -1,5 +1,8 @@
 #define MAX_NEIGHBORS 64  // Максимальное количество соседей для одной частицы
 #define TEMPERATURE_DIFFUSION 0.1f  // Добавляем константу для скорости теплопередачи
+#define MATERIAL_VISCOSITY_OFFSET 1  // Смещение для вязкости в массиве свойств
+#define MATERIAL_SURFACE_TENSION_OFFSET 2  // Добавляем смещение для поверхностного натяжения
+#define BUOYANCY_STRENGTH 9.81f  // Ускорение свободного падения
 
 // Объявляем функцию в начале файла
 float random(int seed) {
@@ -8,25 +11,30 @@ float random(int seed) {
     return (float)seed / 0x7fffffff;
 }
 
-__kernel void updateParticles(__global float* particles,
-                            __global float* temperatures,  // Добавляем массив температур
-                            __global int* neighborIndices,
-                            __global int* neighborCounts,
-                            const int width,
-                            const int height,
-                            const int2 mousePos,
-                            const float mouseForce,
-                            const float deltaTime,
-                            const float viscosity,
-                            const float repulsionStrength,
-                            const float surfaceTension,
-                            const float gravity,
-                            const float baseMouseForce) {
+__kernel void updateParticles(
+    __global float4* particles,
+    __global float* temperatures,
+    __global int* neighborIndices,
+    __global int* neighborCounts,
+    int width,
+    int height,
+    int2 mousePos,
+    float mouseForce,
+    float deltaTime,
+    float viscosity,
+    float repulsion,
+    float surfaceTension,
+    float gravity,
+    float currentMouseForce,
+    float density,  // Добавляем параметр плотности
+    __global int* materialIndices,    // Индексы материалов для каждой частицы
+    __global float* materialProperties // Свойства материалов (плотность, вязкость и т.д.)
+) {
     int gid = get_global_id(0);
     int pid = gid * 4;
     
-    float2 pos = (float2)(particles[pid], particles[pid + 1]);
-    float2 vel = (float2)(particles[pid + 2], particles[pid + 3]);
+    float2 pos = (float2)(particles[gid].x, particles[gid].y);
+    float2 vel = (float2)(particles[gid].z, particles[gid].w);
     
     // Взаимодействие только с соседями из хеш-таблицы
     float2 viscosityForce = (float2)(0, 0);
@@ -43,20 +51,23 @@ __kernel void updateParticles(__global float* particles,
     int startIdx = gid * MAX_NEIGHBORS;
     int count = neighborCounts[gid];
     
+    int currentMaterial = materialIndices[gid];
+    float currentDensity = materialProperties[currentMaterial * 4];  // Предполагаем 4 свойства на материал
+    
     // Сначала вычисляем локальную плотность
-    float density = 0.0f;
+    float localDensity = 0.0f;  // Переименовываем переменную
     for(int n = 0; n < count; n++) {
         int i = neighborIndices[startIdx + n];
         if(i == gid) continue;
         
         int otherId = i * 4;
-        float2 otherPos = (float2)(particles[otherId], particles[otherId + 1]);
+        float2 otherPos = (float2)(particles[i].x, particles[i].y);
         float2 diff = otherPos - pos;
         float dist2 = dot(diff, diff);
         
         if(dist2 < interactionRadius2 && dist2 > 0.0f) {
             float dist = sqrt(dist2);
-            density += (1.0f - dist/interactionRadius);
+            localDensity += (1.0f - dist/interactionRadius);  // Используем новое имя
         }
     }
     
@@ -70,8 +81,8 @@ __kernel void updateParticles(__global float* particles,
         
         float otherTemp = temperatures[i];
         float2 diff = (float2)(
-            particles[i*4] - pos.x,
-            particles[i*4 + 1] - pos.y
+            particles[i].x - pos.x,
+            particles[i].y - pos.y
         );
         float dist2 = dot(diff, diff);
         
@@ -84,14 +95,17 @@ __kernel void updateParticles(__global float* particles,
     // Обновляем температуру частицы
     temperatures[gid] = particleTemp + tempDiff * deltaTime;
     
+    // Используем плотность материала для расчета массы частицы
+    float mass = density;
+    
     // Основной цикл взаимодействия
     for(int n = 0; n < count; n++) {
         int i = neighborIndices[startIdx + n];
         if(i == gid) continue;
         
         int otherId = i * 4;
-        float2 otherPos = (float2)(particles[otherId], particles[otherId + 1]);
-        float2 otherVel = (float2)(particles[otherId + 2], particles[otherId + 3]);
+        float2 otherPos = (float2)(particles[i].x, particles[i].y);
+        float2 otherVel = (float2)(particles[i].z, particles[i].w);
         float2 diff = otherPos - pos;
         float dist2 = dot(diff, diff);
         
@@ -99,23 +113,77 @@ __kernel void updateParticles(__global float* particles,
             float dist = sqrt(dist2);
             float influence = 1.0f - dist/interactionRadius;
             
-            // Вязкость
-            float2 velDiff = otherVel - vel;
-            viscosityForce += velDiff * influence * viscosity;
+            // Получаем свойства материалов
+            int otherMaterial = materialIndices[i];
+            float currentVisc = materialProperties[currentMaterial * 4 + MATERIAL_VISCOSITY_OFFSET];
+            float otherVisc = materialProperties[otherMaterial * 4 + MATERIAL_VISCOSITY_OFFSET];
+            float currentSurfaceTension = materialProperties[currentMaterial * 4 + MATERIAL_SURFACE_TENSION_OFFSET];
+            float otherSurfaceTension = materialProperties[otherMaterial * 4 + MATERIAL_SURFACE_TENSION_OFFSET];
             
-            // Отталкивание
+            // Вычисляем среднюю вязкость для взаимодействия
+            float effectiveViscosity = (currentVisc + otherVisc) * 0.5f;
+            
+            // Применяем вязкость к разнице скоростей
+            float2 velDiff = otherVel - vel;
+            viscosityForce += velDiff * influence * effectiveViscosity * viscosity;
+            
+            // Отталкивание с учетом плотности
             if(dist < minDistance) {
                 float repulsionInfluence = 1.0f - dist/minDistance;
-                repulsionForce -= normalize(diff) * repulsionStrength * repulsionInfluence;
+                repulsionForce -= normalize(diff) * repulsion * repulsionInfluence * mass;
             }
             
-            // Давление для поддержания постоянной плотности
-            float pressureForceStrength = pressureStrength * (density - restDensity) * influence;
-            pressureForce -= normalize(diff) * pressureForceStrength;
+            // Вычисляем среднюю плотность для взаимодействия
+            float avgDensity = (currentDensity + materialProperties[otherMaterial * 4]) * 0.5f;
             
-            // Поверхностное натяжение (модифицированное)
-            if(dist > interactionRadius * 0.7f) {  // только для частиц на поверхности
-                surfaceForce += normalize(diff) * surfaceTension * influence;
+            // Модифицируем силы с учетом разницы плотностей
+            float densityRatio = currentDensity / avgDensity;
+            
+            // Давление зависит от разницы плотностей
+            float pressureForceStrength = pressureStrength * (localDensity - restDensity) * influence;
+            pressureForce -= normalize(diff) * pressureForceStrength * densityRatio;
+            
+            // Вычисляем выталкивающую силу (закон Архимеда)
+            float otherDensity = materialProperties[otherMaterial * 4];
+            
+            // Сила Архимеда = g * V * (ρ2 - ρ1)
+            // где V - объём вытесненной жидкости (используем influence как приближение)
+            // ρ2 - плотность окружающей жидкости
+            // ρ1 - плотность текущей частицы
+            float volumeDisplaced = influence * influence * influence;  // приближение объёма
+            float densityDifference = otherDensity - currentDensity;
+            
+            // Применяем выталкивающую силу
+            if(densityDifference != 0.0f) {
+                float2 buoyancyForce = (float2)(0, BUOYANCY_STRENGTH * volumeDisplaced * densityDifference);
+                
+                // Добавляем боковую составляющую для лучшего разделения
+                float2 horizontalForce = (float2)(
+                    diff.x * 0.1f * fabs(densityDifference),
+                    0
+                );
+                
+                // Применяем силы с учетом расстояния
+                float totalForce = length(buoyancyForce);
+                float2 normalizedForce = normalize(buoyancyForce + horizontalForce);
+                float2 finalForce = normalizedForce * totalForce * influence;
+                
+                // Добавляем к общим силам
+                pressureForce += finalForce;
+            }
+            
+            // Поверхностное натяжение зависит от обоих материалов
+            if(dist > interactionRadius * 0.7f) {
+                float effectiveSurfaceTension;
+                if(currentMaterial == otherMaterial) {
+                    // Для одинаковых материалов - сильное поверхностное натяжение
+                    effectiveSurfaceTension = currentSurfaceTension;
+                } else {
+                    // Для разных материалов - среднее значение, умноженное на коэффициент смешивания
+                    float mixFactor = 0.5f;  // Уменьшаем поверхностное натяжение между разными материалами
+                    effectiveSurfaceTension = (currentSurfaceTension + otherSurfaceTension) * 0.5f * mixFactor;
+                }
+                surfaceForce += normalize(diff) * effectiveSurfaceTension * surfaceTension * influence;
             }
         }
     }
@@ -132,15 +200,17 @@ __kernel void updateParticles(__global float* particles,
         (random(gid * 2 + 1) - 0.5f) * tempFactor * 100.0f
     );
     
-    // Применяем силы с учетом температуры
-    vel += viscosityForce * effectiveViscosity * deltaTime;
-    vel += repulsionForce * deltaTime;
-    vel += surfaceForce * deltaTime;
-    vel += pressureForce * deltaTime;
-    vel += thermalMotion * deltaTime;
+    // Применяем силы с учетом температуры и массы
+    // Делим все силы на массу при обновлении скорости (F = ma => a = F/m)
+    vel += (viscosityForce * effectiveViscosity) * deltaTime / mass;
+    vel += repulsionForce * deltaTime / mass;
+    vel += surfaceForce * deltaTime / mass;
+    vel += pressureForce * deltaTime / mass;
+    vel += thermalMotion * deltaTime;  // thermal motion не зависит от массы
     
-    // Применяем гравитацию
-    vel.y += gravity * deltaTime;
+    // Гравитация не делится на массу (она уже дает правильное ускорение g)
+    float2 gravityForce = (float2)(0, gravity);
+    vel += gravityForce * deltaTime;
     
     // Обработка взаимодействия с мышью
     if (mouseForce != 0) {
@@ -149,10 +219,10 @@ __kernel void updateParticles(__global float* particles,
         float influence = 200.0f;
         
         if (dist < influence) {
-            if (fabs(mouseForce) <= baseMouseForce) {  // Режим рисования
+            if (fabs(mouseForce) <= currentMouseForce) {  // Режим рисования
                 float force = mouseForce * (1.0f - dist/influence);
                 vel += normalize(toMouse) * force * deltaTime;
-            } else if (fabs(mouseForce) > baseMouseForce * 2 && fabs(mouseForce) < baseMouseForce * 4) {  // Режим температуры
+            } else if (fabs(mouseForce) > currentMouseForce * 2 && fabs(mouseForce) < currentMouseForce * 4) {  // Режим температуры
                 // Ничего не делаем с движением частиц
             } else {  // Режим вихря
                 float2 perpendicular = (float2)(-toMouse.y, toMouse.x);  // Перпендикулярный вектор
@@ -191,8 +261,5 @@ __kernel void updateParticles(__global float* particles,
     }
     
     // Сохранение результатов
-    particles[pid] = pos.x;
-    particles[pid + 1] = pos.y;
-    particles[pid + 2] = vel.x;
-    particles[pid + 3] = vel.y;
+    particles[gid] = (float4)(pos.x, pos.y, vel.x, vel.y);
 } 
