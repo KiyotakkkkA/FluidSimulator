@@ -2,3 +2,4 @@
 *.bat
 test/
 target/
+.vscode/

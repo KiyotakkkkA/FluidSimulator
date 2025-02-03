@@ -70,6 +70,11 @@ public class SimulationPanel extends JPanel implements SimulationListener {
     private float temperatureChangeRate = 50.0f;
 
     private final FluidSimulator simulator;
+    private boolean physicsEnabled = true;
+
+    private float[] ghostParticles;
+    private float[] ghostTemperatures;
+    private boolean ghostsActive = false;
 
     public SimulationPanel(GPUCalculator gpuCalculator) {
         this.gpuCalculator = gpuCalculator;
@@ -143,8 +148,24 @@ public class SimulationPanel extends JPanel implements SimulationListener {
                         isRewinding = false;
                     }
                 }
+                if (e.getKeyCode() == KeyEvent.VK_E) {
+                    if (e.getID() == KeyEvent.KEY_PRESSED) {
+                        physicsEnabled = false;
+                        ghostParticles = Arrays.copyOf(particles, particles.length);
+                        ghostTemperatures = Arrays.copyOf(particleTemperatures, particleTemperatures.length);
+                        ghostsActive = true;
+                    } else if (e.getID() == KeyEvent.KEY_RELEASED) {
+                        physicsEnabled = true;
+                        ghostsActive = false;
+                        ghostParticles = null;
+                        ghostTemperatures = null;
+                    }
+                }
                 return false;
             });
+
+        setFocusable(true); // Важно для работы KeyListener
+        requestFocusInWindow();
     }
 
     private void initializeParticles() {
@@ -193,83 +214,85 @@ public class SimulationPanel extends JPanel implements SimulationListener {
 
     @Override
     protected void paintComponent(Graphics g) {
+        super.paintComponent(g);
         Graphics2D g2d = (Graphics2D) g;
-        g2d.setColor(getBackground());
-        g2d.fillRect(0, 0, getWidth(), getHeight());
-
+        g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+        
         long currentTime = System.nanoTime();
         float deltaTime = (currentTime - lastUpdateTime) / 1_000_000_000.0f;
         lastUpdateTime = currentTime;
 
         if (!isRewinding) {
-            if (currentMouseMode == MouseMode.DRAWING && isSpawning) {
-                addParticlesAtMouse(mousePosition);
-            } else if (currentMouseMode == MouseMode.TEMPERATURE && mouseForce != 0) {
-                float influence = 100.0f;
-                float influence2 = influence * influence;
-                
-                for (int i = 0; i < particles.length; i += 4) {
-                    float dx = particles[i] - mousePosition.x;
-                    float dy = particles[i + 1] - mousePosition.y;
-                    float dist2 = dx * dx + dy * dy;
+            if (physicsEnabled) {
+                if (currentMouseMode == MouseMode.DRAWING && isSpawning) {
+                    addParticlesAtMouse(mousePosition);
+                } else if (currentMouseMode == MouseMode.TEMPERATURE && mouseForce != 0) {
+                    float influence = 100.0f;
+                    float influence2 = influence * influence;
                     
-                    if (dist2 < influence2) {
-                        int particleIndex = i / 4;
-                        float factor = 1.0f - (float)Math.sqrt(dist2) / influence;
-                        float tempChange = mouseForce > 0 ? temperatureChangeRate : -temperatureChangeRate;
-                        float newTemp = particleTemperatures[particleIndex] + tempChange * factor * deltaTime;
-                        particleTemperatures[particleIndex] = Math.max(SimulationConstants.MIN_TEMPERATURE,
-                            Math.min(SimulationConstants.MAX_TEMPERATURE, newTemp));
+                    for (int i = 0; i < particles.length; i += 4) {
+                        float dx = particles[i] - mousePosition.x;
+                        float dy = particles[i + 1] - mousePosition.y;
+                        float dist2 = dx * dx + dy * dy;
+                        
+                        if (dist2 < influence2) {
+                            int particleIndex = i / 4;
+                            float factor = 1.0f - (float)Math.sqrt(dist2) / influence;
+                            float tempChange = mouseForce > 0 ? temperatureChangeRate : -temperatureChangeRate;
+                            float newTemp = particleTemperatures[particleIndex] + tempChange * factor * deltaTime;
+                            particleTemperatures[particleIndex] = Math.max(SimulationConstants.MIN_TEMPERATURE,
+                                Math.min(SimulationConstants.MAX_TEMPERATURE, newTemp));
+                        }
                     }
                 }
-            }
 
-            // Создаем текущее состояние и обновляем симуляцию
-            List<Material> materials = Arrays.asList(
-                new Water(), new Oil(), new Mercury(),
-                new Gasoline(), new Glycerin()
-            );
-            
-            float[] materialProps = new float[materials.size() * 4];
-            for (int i = 0; i < materials.size(); i++) {
-                Material m = materials.get(i);
-                int offset = i * 4;
-                materialProps[offset] = (float)m.getDensity();
-                materialProps[offset + 1] = (float)m.getViscosity();
-                materialProps[offset + 2] = (float)m.getSurfaceTension();
-                materialProps[offset + 3] = (float)m.getElasticity();
-            }
+                // Создаем текущее состояние и обновляем симуляцию
+                List<Material> materials = Arrays.asList(
+                    new Water(), new Oil(), new Mercury(),
+                    new Gasoline(), new Glycerin()
+                );
+                
+                float[] materialProps = new float[materials.size() * 4];
+                for (int i = 0; i < materials.size(); i++) {
+                    Material m = materials.get(i);
+                    int offset = i * 4;
+                    materialProps[offset] = (float)m.getDensity();
+                    materialProps[offset + 1] = (float)m.getViscosity();
+                    materialProps[offset + 2] = (float)m.getSurfaceTension();
+                    materialProps[offset + 3] = (float)m.getElasticity();
+                }
 
-            SimulationState state = new SimulationState(
-                particles,
-                particleTemperatures,
-                particleMaterials,
-                materialProps,
-                getWidth(),
-                getHeight(),
-                mouseForce,
-                currentViscosity,
-                currentRepulsion,
-                currentSurfaceTension,
-                currentGravity,
-                mousePosition.x,
-                mousePosition.y,
-                currentMouseForce
-            );
+                SimulationState state = new SimulationState(
+                    particles,
+                    particleTemperatures,
+                    particleMaterials,
+                    materialProps,
+                    getWidth(),
+                    getHeight(),
+                    mouseForce,
+                    currentViscosity,
+                    currentRepulsion,
+                    currentSurfaceTension,
+                    currentGravity,
+                    mousePosition.x,
+                    mousePosition.y,
+                    currentMouseForce
+                );
 
-            simulator.setState(state);
-            simulator.update(deltaTime);
-            
-            // Сохраняем состояние для перемотки
-            float[] historyCopy = new float[particles.length];
-            System.arraycopy(particles, 0, historyCopy, 0, particles.length);
-            particleHistory.add(historyCopy);
-            while (particleHistory.size() > maxHistorySize) {
-                particleHistory.remove(0);
+                simulator.setState(state);
+                simulator.update(deltaTime);
+                
+                // Сохраняем состояние для перемотки
+                float[] historyCopy = new float[particles.length];
+                System.arraycopy(particles, 0, historyCopy, 0, particles.length);
+                particleHistory.add(historyCopy);
+                while (particleHistory.size() > maxHistorySize) {
+                    particleHistory.remove(0);
+                }
+                
+                // Обновляем частицы из состояния симуляции
+                particles = simulator.getCurrentState().getParticles();
             }
-            
-            // Обновляем частицы из состояния симуляции
-            particles = simulator.getCurrentState().getParticles();
         } else if (!particleHistory.isEmpty()) {
             particles = particleHistory.remove(particleHistory.size() - 1);
             if (particles.length > 0) {
@@ -277,6 +300,7 @@ public class SimulationPanel extends JPanel implements SimulationListener {
             }
         }
 
+        // Отрисовка обычных частиц (теперь всегда с обычным цветом)
         if (particles.length > 0) {
             double scale = particleSize / (double)imageSize;
             AffineTransform transform = new AffineTransform();
@@ -287,10 +311,18 @@ public class SimulationPanel extends JPanel implements SimulationListener {
                 float vx = particles[i + 2];
                 float vy = particles[i + 3];
                 
-                if (temperatureColoring) {
+                Color particleColor;
+                if (velocityColoring) {
+                    float velocity = (float)Math.sqrt(vx*vx + vy*vy);
+                    float colorRatio = Math.min(velocity / SimulationConstants.VELOCITY_COLOR_THRESHOLD, 1.0f);
+                    particleColor = interpolateColor(
+                        SimulationConstants.PARTICLE_COLOR_SLOW,
+                        SimulationConstants.PARTICLE_COLOR_FAST,
+                        colorRatio
+                    );
+                } else if (temperatureColoring) {
                     float tempRatio = (particleTemperatures[i/4] - SimulationConstants.MIN_TEMPERATURE) / 
                         (SimulationConstants.MAX_TEMPERATURE - SimulationConstants.MIN_TEMPERATURE);
-                    Color particleColor;
                     if (tempRatio <= 0.5f) {
                         particleColor = interpolateColor(
                             SimulationConstants.COLD_COLOR,
@@ -304,27 +336,44 @@ public class SimulationPanel extends JPanel implements SimulationListener {
                             (tempRatio - 0.5f) * 2
                         );
                     }
-                    g2d.setColor(particleColor);
-                    transform.setToTranslation(x, y);
-                    transform.scale(scale, scale);
-                    g2d.fillOval((int)x, (int)y, particleSize, particleSize);
-                } else if (velocityColoring) {
-                    float velocity = (float)Math.sqrt(vx*vx + vy*vy);
-                    float colorRatio = Math.min(velocity / SimulationConstants.VELOCITY_COLOR_THRESHOLD, 1.0f);
-                    Color particleColor = interpolateColor(
-                        SimulationConstants.PARTICLE_COLOR_SLOW,
-                        SimulationConstants.PARTICLE_COLOR_FAST,
-                        colorRatio
-                    );
-                    g2d.setColor(particleColor);
-                    transform.setToTranslation(x, y);
-                    transform.scale(scale, scale);
-                    g2d.fillOval((int)x, (int)y, particleSize, particleSize);
                 } else {
-                    g2d.setColor(new Color(particleColors[i/4]));
-                    g2d.fillOval((int)x, (int)y, particleSize, particleSize);
+                    particleColor = new Color(particleColors[i/4]);
                 }
+                
+                g2d.setColor(particleColor);
+                g2d.fillOval((int)x, (int)y, particleSize, particleSize);
             }
+        }
+
+        // Отрисовка призрачных частиц поверх основных
+        if (ghostsActive && ghostParticles != null) {
+            for (int i = 0; i < ghostParticles.length; i += 4) {
+                float x = ghostParticles[i] - particleSize/2;
+                float y = ghostParticles[i + 1] - particleSize/2;
+                
+                g2d.setColor(new Color(255, 0, 0, 128));
+                g2d.fillOval((int)x, (int)y, particleSize, particleSize);
+            }
+            
+            SimulationState ghostState = new SimulationState(
+                ghostParticles,
+                ghostTemperatures,
+                particleMaterials,
+                simulator.getCurrentState().getMaterialProperties(),
+                getWidth(),
+                getHeight(),
+                mouseForce,
+                currentViscosity,
+                currentRepulsion,
+                currentSurfaceTension,
+                currentGravity,
+                mousePosition.x,
+                mousePosition.y,
+                currentMouseForce
+            );
+            simulator.updateGhosts(ghostState, deltaTime);
+            ghostParticles = simulator.getGhostParticles();
+            ghostTemperatures = simulator.getGhostTemperatures();
         }
     }
 
@@ -467,6 +516,16 @@ public class SimulationPanel extends JPanel implements SimulationListener {
 
     @Override
     public void onSimulationUpdated(SimulationState state) {
-        repaint();  // Перерисовываем панель при обновлении физики
+        if (!physicsEnabled) {
+            return; // Пропускаем обновление если физика отключена
+        }
+        
+        // Обновляем состояние частиц только если физика включена
+        if (state.hasParticles()) {
+            particles = state.getParticles();
+            particleTemperatures = state.getTemperatures();
+        }
+        
+        repaint();
     }
 } 

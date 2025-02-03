@@ -9,6 +9,10 @@ public class FluidSimulator {
     private final GPUCalculator gpuCalculator;
     private SimulationState currentState;
     private final List<SimulationListener> listeners;
+    private boolean physicsEnabled = true;
+    
+    private float[] ghostParticles;
+    private float[] ghostTemperatures;
     
     public FluidSimulator(GPUCalculator gpuCalculator) {
         this.gpuCalculator = gpuCalculator;
@@ -17,8 +21,8 @@ public class FluidSimulator {
     }
     
     public void update(float deltaTime) {
-        // Обновление физики
-        if (currentState.hasParticles()) {
+        // Обновление физики только если есть частицы и физика включена
+        if (currentState.hasParticles() && physicsEnabled) {
             float[] newParticles = gpuCalculator.updateParticles(
                 currentState.getParticles(),
                 currentState.getTemperatures(),
@@ -67,5 +71,41 @@ public class FluidSimulator {
     
     public SimulationState getCurrentState() {
         return currentState;
+    }
+    
+    public void setPhysicsEnabled(boolean enabled) {
+        this.physicsEnabled = enabled;
+    }
+
+    public void updateGhosts(SimulationState state, float deltaTime) {
+        // Обновляем физику для призрачных частиц
+        if (state.hasParticles()) {
+            ghostParticles = gpuCalculator.updateParticles(
+                state.getParticles(),
+                state.getTemperatures(),
+                state.getMaterialIndices(),
+                state.getMaterialProperties(),
+                state.getWidth(),
+                state.getHeight(),
+                state.getMouseX(),
+                state.getMouseY(),
+                state.getMouseForce(),
+                deltaTime,
+                state.getViscosity(),
+                state.getRepulsion(),
+                state.getSurfaceTension(),
+                state.getGravity(),
+                state.getCurrentMouseForce()
+            );
+            ghostTemperatures = state.getTemperatures();
+        }
+    }
+
+    public float[] getGhostParticles() {
+        return ghostParticles;
+    }
+
+    public float[] getGhostTemperatures() {
+        return ghostTemperatures;
     }
 } 
