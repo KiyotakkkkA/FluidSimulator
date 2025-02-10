@@ -4,3 +4,4 @@ test/
 target/
 .vscode/
 *.log
+*.xml
