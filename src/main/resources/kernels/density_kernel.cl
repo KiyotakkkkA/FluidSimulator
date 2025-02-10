@@ -10,7 +10,6 @@ __kernel void computeDensity(
     int lid = get_local_id(0);
     int groupSize = get_local_size(0);
     
-    // Загружаем частицы в локальную память
     localParticles[lid] = particles[gid];
     barrier(CLK_LOCAL_MEM_FENCE);
     
@@ -21,7 +20,6 @@ __kernel void computeDensity(
     int startIdx = gid * MAX_NEIGHBORS;
     int count = neighborCounts[gid];
     
-    // Векторизованный расчет плотности
     for(int n = 0; n < count; n += 4) {
         int4 indices = vload4(0, neighborIndices + startIdx + n);
         float4 densitySum = 0.0f;

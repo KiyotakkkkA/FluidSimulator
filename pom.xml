@@ -6,15 +6,31 @@
 
     <groupId>com.fluidsim</groupId>
     <artifactId>fluid-simulation</artifactId>
-    <version>2.1.0</version>
+    <version>2.2.0</version>
 
     <properties>
-        <maven.compiler.source>1.8</maven.compiler.source>
-        <maven.compiler.target>1.8</maven.compiler.target>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <maven.compiler.source>22</maven.compiler.source>
+        <maven.compiler.target>22</maven.compiler.target>
     </properties>
 
     <dependencies>
+        <dependency>
+            <groupId>org.lwjgl.lwjgl</groupId>
+            <artifactId>lwjgl</artifactId>
+            <version>2.9.3</version>
+        </dependency>
+        <dependency>
+            <groupId>org.lwjgl.lwjgl</groupId>
+            <artifactId>lwjgl_util</artifactId>
+            <version>2.9.3</version>
+        </dependency>
+        <dependency>
+            <groupId>org.lwjgl.lwjgl</groupId>
+            <artifactId>lwjgl-platform</artifactId>
+            <version>2.9.3</version>
+            <classifier>natives-windows</classifier>
+        </dependency>
         <dependency>
             <groupId>org.jocl</groupId>
             <artifactId>jocl</artifactId>
@@ -83,6 +99,10 @@
                             <transformers>
                                 <transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
                                     <mainClass>com.fluidsim.Main</mainClass>
+                                    <manifestEntries>
+                                        <Add-Opens>java.base/java.lang</Add-Opens>
+                                        <Add-Modules>jdk.incubator.vector</Add-Modules>
+                                    </manifestEntries>
                                 </transformer>
                             </transformers>
                             <filters>
@@ -119,6 +139,19 @@
                         </configuration>
                     </execution>
                 </executions>
+            </plugin>
+
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <version>3.11.0</version>
+                <configuration>
+                    <source>22</source>
+                    <target>22</target>
+                    <compilerArgs>
+                        <arg>--add-modules=jdk.incubator.vector</arg>
+                    </compilerArgs>
+                </configuration>
             </plugin>
         </plugins>
     </build>

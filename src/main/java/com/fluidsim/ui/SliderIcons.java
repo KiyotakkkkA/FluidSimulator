@@ -17,7 +17,6 @@ public class SliderIcons {
             g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
             g2d.setColor(new Color(100, 150, 255));
             
-            // Рисуем каплю
             int[] xPoints = {x+8, x+4, x+12};
             int[] yPoints = {y+4, y+12, y+12};
             g2d.fillPolygon(xPoints, yPoints, 3);
@@ -37,7 +36,6 @@ public class SliderIcons {
             g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
             g2d.setColor(new Color(100, 150, 255));
             
-            // Рисуем стрелку вниз
             g2d.setStroke(new BasicStroke(2));
             g2d.drawLine(x+8, y+4, x+8, y+12);
             g2d.drawLine(x+8, y+12, x+5, y+9);
@@ -49,6 +47,4 @@ public class SliderIcons {
         @Override
         public int getIconHeight() { return 16; }
     }
-    
-    // Добавьте другие иконки для разных типов слайдеров
 } 

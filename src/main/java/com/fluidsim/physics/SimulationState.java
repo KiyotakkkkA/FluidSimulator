@@ -44,7 +44,6 @@ public class SimulationState implements Serializable {
         this.currentMouseForce = currentMouseForce;
     }
 
-    // Добавляем геттеры
     public float[] getParticles() { return particles; }
     public float[] getTemperatures() { return temperatures; }
     public int[] getMaterialIndices() { return materialIndices; }

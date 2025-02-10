@@ -51,11 +51,9 @@ public class CustomSliderUI extends BasicSliderUI {
         Rectangle trackBounds = trackRect;
         int cy = trackBounds.y + (trackBounds.height / 2) - (TRACK_HEIGHT / 2);
         
-        // Фон трека
         RoundRectangle2D trackShape = new RoundRectangle2D.Float(
             trackBounds.x, cy, trackBounds.width, TRACK_HEIGHT, TRACK_ARC, TRACK_ARC);
         
-        // Градиент для трека
         LinearGradientPaint trackGradient = new LinearGradientPaint(
             trackBounds.x, cy, trackBounds.x, cy + TRACK_HEIGHT,
             new float[]{0f, 0.5f, 1f},
@@ -65,7 +63,6 @@ public class CustomSliderUI extends BasicSliderUI {
         g2d.setPaint(trackGradient);
         g2d.fill(trackShape);
         
-        // Активная часть трека
         if (slider.isEnabled()) {
             int thumbPos = thumbRect.x + (thumbRect.width / 2);
             RoundRectangle2D activeTrack = new RoundRectangle2D.Float(
@@ -108,7 +105,6 @@ public class CustomSliderUI extends BasicSliderUI {
         int max = slider.getMaximum();
         int min = slider.getMinimum();
         
-        // Основные деления
         if (majorTickSpacing > 0) {
             for (int value = min; value <= max; value += majorTickSpacing) {
                 int x = xPositionForValue(value);
@@ -116,8 +112,6 @@ public class CustomSliderUI extends BasicSliderUI {
                 g2d.drawLine(x, cy + 8, x, cy + 14);
             }
         }
-        
-        // Промежуточные деления
         if (minorTickSpacing > 0) {
             g2d.setStroke(new BasicStroke(0.8f));
             for (int value = min; value <= max; value += minorTickSpacing) {
@@ -156,25 +150,20 @@ public class CustomSliderUI extends BasicSliderUI {
         Graphics2D g2d = (Graphics2D) g;
         g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
         
-        // Тень
         g2d.setColor(new Color(0, 0, 0, 30));
         g2d.fillOval(thumbRect.x + 1, thumbRect.y + 1, THUMB_SIZE, THUMB_SIZE);
         
-        // Основной цвет ползунка
         g2d.setColor(THUMB_COLOR);
         g2d.fillOval(thumbRect.x, thumbRect.y, THUMB_SIZE - 1, THUMB_SIZE - 1);
         
-        // Блик
         g2d.setColor(THUMB_BORDER);
         g2d.drawOval(thumbRect.x, thumbRect.y, THUMB_SIZE - 1, THUMB_SIZE - 1);
         
-        // Внутренний блик
         g2d.setColor(new Color(255, 255, 255, 50));
         g2d.fillOval(thumbRect.x + 3, thumbRect.y + 3, THUMB_SIZE - 6, THUMB_SIZE - 6);
     }
     
     @Override
     public void paintFocus(Graphics g) {
-        // Убираем стандартную обводку фокуса
     }
 } 

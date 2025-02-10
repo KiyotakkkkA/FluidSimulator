@@ -6,6 +6,7 @@ import java.util.concurrent.CopyOnWriteArrayList;
 import com.fluidsim.GPUCalculator;
 
 public class FluidSimulator {
+    private static final int TARGET_FPS = 120;
     private final GPUCalculator gpuCalculator;
     private SimulationState currentState;
     private final List<SimulationListener> listeners;
@@ -21,7 +22,6 @@ public class FluidSimulator {
     }
     
     public void update(float deltaTime) {
-        // Обновление физики только если есть частицы и физика включена
         if (currentState.hasParticles() && physicsEnabled) {
             float[] newParticles = gpuCalculator.updateParticles(
                 currentState.getParticles(),
@@ -78,7 +78,6 @@ public class FluidSimulator {
     }
 
     public void updateGhosts(SimulationState state, float deltaTime) {
-        // Обновляем физику для призрачных частиц
         if (state.hasParticles()) {
             ghostParticles = gpuCalculator.updateParticles(
                 state.getParticles(),
@@ -107,5 +106,25 @@ public class FluidSimulator {
 
     public float[] getGhostTemperatures() {
         return ghostTemperatures;
+    }
+
+    private void startSimulationLoop() {
+        Thread.startVirtualThread(() -> {
+            while (!Thread.interrupted()) {
+                long startTime = System.nanoTime();
+                update(1.0f / TARGET_FPS);
+                long endTime = System.nanoTime();
+                
+                long sleepTime = (1_000_000_000 / TARGET_FPS) - (endTime - startTime);
+                if (sleepTime > 0) {
+                    try {
+                        Thread.sleep(sleepTime / 1_000_000);
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                        break;
+                    }
+                }
+            }
+        });
     }
 } 

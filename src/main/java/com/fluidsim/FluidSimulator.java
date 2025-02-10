@@ -22,7 +22,6 @@ public class FluidSimulator extends JPanel {
         add(simulationPanel, BorderLayout.CENTER);
         add(controlPanel, BorderLayout.EAST);
 
-        // Используем более точный таймер
         Thread animationThread = new Thread(() -> {
             long lastLoopTime = System.nanoTime();
             

@@ -11,12 +11,10 @@ __kernel void buildSpatialHash(__global float* particles,
     
     float2 pos = (float2)(particles[gid * 4], particles[gid * 4 + 1]);
     
-    // Определяем границы поиска в сетке
     float searchDist = searchRadius + CELL_SIZE;
     int2 minCell = convert_int2((pos - searchDist) / CELL_SIZE);
     int2 maxCell = convert_int2((pos + searchDist) / CELL_SIZE);
     
-    // Поиск соседей
     int neighborCount = 0;
     int startIdx = gid * MAX_NEIGHBORS;
     

@@ -6,7 +6,7 @@ public abstract class Material {
     private final int color;
     private final double viscosity;
     private final double surfaceTension;
-    private final double elasticity;  // Коэффициент упругости для сохранения энергии
+    private final double elasticity;
 
     public Material(String name, double density, int color, 
                    double viscosity, double surfaceTension, double elasticity) {

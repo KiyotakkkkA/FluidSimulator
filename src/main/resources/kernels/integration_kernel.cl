@@ -10,11 +10,8 @@ __kernel void integrate(
     float2 pos = (float2)(particles[gid].x, particles[gid].y);
     float2 vel = (float2)(particles[gid].z, particles[gid].w);
     
-    // Применяем силы и обновляем позицию/скорость
     vel += forces[gid] * deltaTime;
     vel += (float2)(0, gravity) * deltaTime;
-    
-    // ... существующая логика обработки мыши и границ ...
     
     particles[gid] = (float4)(pos + vel * deltaTime, vel);
 } 
